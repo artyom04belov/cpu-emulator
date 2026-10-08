@@ -1,185 +1,423 @@
-"""Run with python3 main.py. Only the Python standard library is required."""
+"""Graphical emulator. Run with: python3 main.py  (only the standard library is needed)."""
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-from core import CPU, assemble
+from tkinter import ttk, filedialog, font as tkfont
+
+from assembler import AsmError, assemble
+from cpu import CPU, CPUError
+from isa import (MEM_SIZE, REG_COUNT, INSTR_CELLS, REG, IMM, DIR, HALT, MOVE, ALU, COMPARE, JUMP,
+                 DecodeError, decode, disassemble, fields)
 
 BASE = Path(__file__).resolve().parent
+EXAMPLES = [('Maximum', 'maximum'), ('Convolution', 'convolution')]
+STEP_LIMIT = 20_000
+
+BG, PANEL, INK, MUTED, LINE = '#f5f5f4', '#ffffff', '#1c1917', '#78716c', '#e7e5e4'
+NEXT, CHANGED, ERROR = '#dbeafe', '#fde68a', '#fecaca'
+SHORT_MODES = ('register', 'immediate', 'direct', 'indirect')
+
+
+def describe_fields(word):
+    """(title, bits, meaning) for every field of the instruction in IR."""
+    f = fields(word)
+    try:
+        ins = decode(word)
+    except DecodeError:
+        ins = None
+    kind = ins.kind if ins else None
+    a3_mode = f['dmode'] if f['dmode'] != REG else f['smode']
+    if kind in (None, HALT):
+        a1 = a2 = a3 = 'unused'
+    else:
+        a1 = f"R{f['a1']}" if kind in (MOVE, ALU) else 'unused'
+        a2 = f"R{f['a2']}" if kind in (ALU, COMPARE) else 'unused'
+        if kind == JUMP:
+            a3 = f"addr 0x{f['a3']:03X}"
+        elif a3_mode == IMM:
+            a3 = f"number {f['a3']}"
+        elif a3_mode == DIR:
+            a3 = f"addr 0x{f['a3']:03X}"
+        else:
+            a3 = f"R{f['a3']}"
+    return [
+        ('Opcode', f"{f['opcode']:08b}", ins.name if ins else 'unknown'),
+        ('Dest. mode', f"{f['dmode']:02b}", SHORT_MODES[f['dmode']]),
+        ('Src. mode', f"{f['smode']:02b}", SHORT_MODES[f['smode']]),
+        ('A1', f"{f['a1']:04b}", a1),
+        ('A2', f"{f['a2']:04b}", a2),
+        ('A3', f"{f['a3']:012b}", a3),
+    ]
+
 
 class App:
     def __init__(self, root):
         self.root = root
-        root.title('Neumann Lab — двухадресный процессор')
-        root.geometry('1250x850')
-        self.cpu = self.program = None
-        self.running = False
+        root.title('CPU Emulator - variant 11: three-address, von Neumann')
+        root.geometry('1360x800')
+        root.minsize(1180, 660)
+        root.configure(bg=BG)
+        self.cpu = CPU()
+        self.program = None
+        self.built_text = None
         self.timer = None
-        bar = ttk.Frame(root, padding=8)
+        self.marked = set()                    # memory rows that carry a highlight
+
+        families = set(tkfont.families())
+        mono = next((f for f in ('JetBrains Mono', 'JetBrainsMono Nerd Font', 'Menlo', 'Consolas',
+                                 'DejaVu Sans Mono') if f in families), 'Courier')
+        self.mono = (mono, 10)
+        self.mono_big = (mono, 13, 'bold')
+        self.ui = tkfont.nametofont('TkDefaultFont').actual('family')
+
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('.', background=BG, foreground=INK)
+        style.configure('TButton', padding=(10, 4))
+        style.configure('Treeview', font=self.mono, rowheight=20, background=PANEL,
+                        fieldbackground=PANEL, borderwidth=0)
+        style.configure('Treeview.Heading', background=BG, foreground=MUTED, relief='flat')
+
+        self.build_toolbar()
+        self.build_log()
+        body = ttk.Frame(root)
+        body.pack(fill='both', expand=True, padx=12)
+        body.columnconfigure(0, weight=25, uniform='col')
+        body.columnconfigure(1, weight=42, uniform='col')
+        body.columnconfigure(2, weight=33, uniform='col')
+        body.rowconfigure(0, weight=1)
+        self.build_editor(body)
+        self.build_cpu(body)
+        self.build_memory(body)
+        self.load_example('maximum')
+
+    # --- layout ---------------------------------------------------------------------------
+
+    def heading(self, parent, text):
+        return tk.Label(parent, text=text.upper(), bg=parent['bg'], fg=MUTED, anchor='w',
+                        font=(self.ui, 8, 'bold'))
+
+    def build_toolbar(self):
+        bar = ttk.Frame(self.root, padding=(12, 10))
         bar.pack(fill='x')
-        for title, command in [('Максимум', lambda: self.example('maximum')), ('Свёртка', lambda: self.example('convolution')), ('Открыть', self.open), ('Сохранить', self.save), ('Собрать / сброс', self.build), ('Этап', self.step), ('Пуск', self.run), ('Пауза', self.pause)]:
+        ttk.Label(bar, text='Examples:').pack(side='left')
+        for title, name in EXAMPLES:
+            ttk.Button(bar, text=title, command=lambda n=name: self.load_example(n)).pack(side='left', padx=2)
+        for title, command in (('Open...', self.open_file), ('Save...', self.save_file)):
             ttk.Button(bar, text=title, command=command).pack(side='left', padx=2)
-        ttk.Label(bar, text='мс/этап').pack(side='left', padx=5)
-        self.delay = tk.IntVar(value=100)
-        ttk.Spinbox(bar, from_=1, to=2000, textvariable=self.delay, width=5).pack(side='left')
-        pane = ttk.Panedwindow(root, orient='horizontal')
-        pane.pack(fill='both', expand=True, padx=8)
-        left, right = ttk.Frame(pane), ttk.Frame(pane)
-        pane.add(left, weight=1)
-        pane.add(right, weight=2)
-        ttk.Label(left, text='Ассемблер · измените массивы в строках .word').pack(anchor='w')
-        self.editor = tk.Text(left, width=48, undo=True, font=('Menlo', 12), wrap='none')
+        ttk.Separator(bar, orient='vertical').pack(side='left', fill='y', padx=10)
+        for title, command in (('Assemble', self.build), ('Step', self.step), ('Run', self.run),
+                               ('Pause', self.pause), ('Reset', self.reset)):
+            ttk.Button(bar, text=title, command=command).pack(side='left', padx=2)
+        ttk.Label(bar, text='Run delay, ms:').pack(side='left', padx=(14, 4))
+        self.delay = tk.IntVar(value=150)
+        ttk.Spinbox(bar, from_=0, to=2000, increment=50, textvariable=self.delay, width=5).pack(side='left')
+
+    def build_editor(self, body):
+        frame = tk.Frame(body, bg=BG)
+        frame.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
+        self.heading(frame, 'Assembly program').pack(fill='x', pady=(0, 4))
+        self.editor = tk.Text(frame, font=self.mono, wrap='none', undo=True, bg=PANEL, fg=INK,
+                              relief='flat', highlightthickness=1, highlightbackground=LINE,
+                              padx=8, pady=6, width=10)
         self.editor.pack(fill='both', expand=True)
-        self.editor.tag_configure('current', background='#ffe49c', foreground='#111111')
-        self.canvas = tk.Canvas(right, height=190, bg='#f1f5f9', highlightthickness=0)
-        self.canvas.pack(fill='x')
-        self.boxes = {}
-        for key, coords, label in [('control', (15, 25, 190, 105), 'Устройство управления\nPC → IR → декодер'), ('alu', (235, 25, 395, 105), 'АЛУ\n+, −, ×, сравнение'), ('memory', (440, 25, 640, 105), 'Общая память\nкоманды + данные')]:
-            self.boxes[key] = self.canvas.create_rectangle(*coords, fill='white', outline='#64748b', width=2)
-            self.canvas.create_text((coords[0]+coords[2])/2, 65, text=label, fill='#0f172a')
-        self.canvas.create_line(100, 105, 100, 145, 540, 145, 540, 105, arrow='both', width=2)
-        self.canvas.create_line(315, 105, 315, 145, width=2)
-        self.canvas.create_text(315, 168, text='Шина адресов и данных', fill='#334155')
-        self.state = tk.StringVar()
-        ttk.Label(right, textvariable=self.state, font=('Menlo', 11), justify='left').pack(anchor='w', pady=8)
-        memframe = ttk.Frame(right)
-        memframe.pack(fill='both', expand=True)
-        self.memory = ttk.Treeview(memframe, columns=('address', 'label', 'hex', 'value'), show='headings', height=13)
-        for col, title, width in [('address', 'Адрес', 60), ('label', 'Метка', 120), ('hex', 'Слово HEX', 120), ('value', 'Без знака', 120)]:
-            self.memory.heading(col, text=title)
-            self.memory.column(col, width=width)
-        scroll = ttk.Scrollbar(memframe, orient='vertical', command=self.memory.yview)
+        self.editor.tag_configure('next', background=NEXT)
+        self.editor.tag_configure('error', background=ERROR)
+
+    def build_cpu(self, body):
+        frame = tk.Frame(body, bg=BG)
+        frame.grid(row=0, column=1, sticky='nsew', padx=(0, 10))
+
+        def panel(title, parent=frame, **pack):
+            holder = tk.Frame(parent, bg=BG)
+            holder.pack(**(pack or dict(fill='x')))
+            self.heading(holder, title).pack(fill='x', pady=(0, 4))
+            box = tk.Frame(holder, bg=PANEL, highlightthickness=1, highlightbackground=LINE, padx=10, pady=6)
+            box.pack(fill='both', expand=True, pady=(0, 8))
+            return box
+
+        def value(parent, big=False):
+            return tk.Label(parent, bg=PANEL, fg=INK, font=self.mono_big if big else self.mono, anchor='w', pady=0)
+
+        def caption(parent, text):
+            return tk.Label(parent, text=text, bg=PANEL, fg=MUTED, anchor='w')
+
+        top = tk.Frame(frame, bg=BG)
+        top.pack(fill='x')
+        box = panel('Program counter (PC)', top, side='left', fill='both', expand=True, padx=(0, 10))
+        caption(box, 'Address of the next instruction').pack(anchor='w')
+        self.pc_label = value(box, big=True)
+        self.pc_label.pack(anchor='w')
+
+        box = panel('Flags', top, side='left', fill='both', expand=True)
+        self.flag_labels = {}
+        for col, (key, title) in enumerate((('z', 'Z  zero'), ('c', 'C  carry'), ('s', 'S  sign'))):
+            caption(box, title).grid(row=0, column=col, sticky='w', padx=(0, 22))
+            self.flag_labels[key] = value(box, big=True)
+            self.flag_labels[key].grid(row=1, column=col, sticky='w')
+
+        box = panel('Instruction register (IR) - the last fetched instruction')
+        top = tk.Frame(box, bg=PANEL)
+        top.pack(fill='x')
+        caption(top, 'Machine code').grid(row=0, column=0, sticky='w', padx=(0, 30))
+        caption(top, 'Assembly').grid(row=0, column=1, sticky='w')
+        self.ir_code = value(top, big=True)
+        self.ir_code.grid(row=1, column=0, sticky='w', padx=(0, 30))
+        self.ir_asm = value(top, big=True)
+        self.ir_asm.grid(row=1, column=1, sticky='w')
+        grid = tk.Frame(box, bg=PANEL)
+        grid.pack(fill='x', pady=(6, 0))
+        caption(grid, 'Field').grid(row=0, column=0, sticky='w', padx=(0, 12))
+        caption(grid, 'Bits').grid(row=1, column=0, sticky='w', padx=(0, 12))
+        caption(grid, 'Meaning').grid(row=2, column=0, sticky='w', padx=(0, 12))
+        self.field_cells = []
+        for col in range(6):
+            cells = (caption(grid, ''), value(grid), value(grid))
+            for row, cell in enumerate(cells):
+                cell.grid(row=row, column=col + 1, sticky='w', padx=(0, 8))
+            self.field_cells.append(cells)
+
+        box = panel('General-purpose registers (16 bits each)')
+        self.reg_labels = []
+        half = REG_COUNT // 2
+        for block in range(2):
+            base = block * 4
+            for col, title in enumerate(('Register', 'Hex', 'Unsigned')):
+                caption(box, title).grid(row=0, column=base + col, sticky='w', padx=(0, 16))
+            box.columnconfigure(base + 3, minsize=30)
+        for n in range(REG_COUNT):
+            row, base = n % half + 1, n // half * 4
+            name = value(box)
+            name.configure(text=f'R{n}')
+            name.grid(row=row, column=base, sticky='w')
+            cells = (value(box), value(box))
+            cells[0].grid(row=row, column=base + 1, sticky='w', padx=(0, 16))
+            cells[1].grid(row=row, column=base + 2, sticky='w', padx=(0, 16))
+            self.reg_labels.append(cells)
+
+    def build_memory(self, body):
+        frame = tk.Frame(body, bg=BG)
+        frame.grid(row=0, column=2, sticky='nsew')
+        self.heading(frame, f'Memory (RAM) - {MEM_SIZE} cells of 16 bits, code and data').pack(fill='x', pady=(0, 4))
+        holder = tk.Frame(frame, bg=PANEL, highlightthickness=1, highlightbackground=LINE)
+        holder.pack(fill='both', expand=True)
+        columns = (('address', 'Address', 62), ('label', 'Label', 62), ('hex', 'Hex', 46),
+                   ('value', 'Unsigned', 68), ('meaning', 'Contents', 170))
+        self.memory = ttk.Treeview(holder, columns=[c[0] for c in columns], show='headings')
+        for key, title, width in columns:
+            self.memory.heading(key, text=title, anchor='w')
+            self.memory.column(key, width=width, anchor='w', stretch=key == 'meaning')
+        scroll = ttk.Scrollbar(holder, orient='vertical', command=self.memory.yview)
         self.memory.configure(yscrollcommand=scroll.set)
-        self.memory.pack(side='left', fill='both', expand=True)
         scroll.pack(side='right', fill='y')
-        self.result = tk.StringVar()
-        ttk.Label(root, textvariable=self.result, wraplength=1200, padding=8).pack(fill='x')
-        self.log = tk.Text(root, height=7, font=('Menlo', 11), state='disabled')
-        self.log.pack(fill='x', padx=8, pady=5)
-        self.example('maximum')
+        self.memory.pack(side='left', fill='both', expand=True)
+        self.memory.tag_configure('next', background=NEXT)
+        self.memory.tag_configure('changed', background=CHANGED)
+        for addr in range(MEM_SIZE):
+            self.memory.insert('', 'end', iid=str(addr))
 
-    def pause(self):
-        self.running = False
-        if self.timer is not None:
-            self.root.after_cancel(self.timer)
-            self.timer = None
+    def build_log(self):
+        bar = tk.Frame(self.root, bg=BG)
+        bar.pack(side='bottom', fill='x', padx=12, pady=(0, 8))
+        self.state_label = tk.Label(bar, bg=BG, fg=MUTED, anchor='w')
+        self.state_label.pack(side='left')
+        self.status = tk.Label(bar, bg=BG, fg=MUTED, anchor='e')
+        self.status.pack(side='right')
+        frame = tk.Frame(self.root, bg=BG)
+        frame.pack(side='bottom', fill='x', padx=12, pady=(0, 6))
+        self.heading(frame, 'Execution trace: address, machine code, instruction, effect').pack(fill='x', pady=(0, 4))
+        self.log = tk.Text(frame, height=5, font=self.mono, state='disabled', bg=PANEL, fg=INK,
+                           relief='flat', highlightthickness=1, highlightbackground=LINE, padx=8, pady=6)
+        self.log.pack(fill='x')
 
-    def example(self, name):
-        self.pause()
+    # --- actions --------------------------------------------------------------------------
+
+    def say(self, text, error=False):
+        self.status.configure(text=text, fg='#b91c1c' if error else MUTED)
+
+    def write_log(self, text=None):
+        self.log.configure(state='normal')
+        if text is None:
+            self.log.delete('1.0', 'end')
+        else:
+            self.log.insert('end', text + '\n')
+            self.log.see('end')
+        self.log.configure(state='disabled')
+
+    def set_text(self, text):
         self.editor.delete('1.0', 'end')
-        self.editor.insert('1.0', (BASE / 'examples' / (name + '.asm')).read_text(encoding='utf-8'))
+        self.editor.insert('1.0', text)
         self.build()
 
-    def open(self):
-        self.pause()
-        path = filedialog.askopenfilename(filetypes=[('Ассемблер', '*.asm'), ('Все файлы', '*')])
+    def load_example(self, name):
+        self.set_text((BASE / 'examples' / f'{name}.asm').read_text(encoding='utf-8'))
+
+    def open_file(self):
+        path = filedialog.askopenfilename(filetypes=[('Assembly', '*.asm'), ('All files', '*')])
         if path:
             try:
-                text = Path(path).read_text(encoding='utf-8')
-                self.editor.delete('1.0', 'end')
-                self.editor.insert('1.0', text)
-                self.build()
+                self.set_text(Path(path).read_text(encoding='utf-8'))
             except (OSError, UnicodeError) as exc:
-                messagebox.showerror('Ошибка открытия', str(exc))
+                self.say(str(exc), error=True)
 
-    def save(self):
+    def save_file(self):
         path = filedialog.asksaveasfilename(defaultextension='.asm')
         if path:
             try:
                 Path(path).write_text(self.editor.get('1.0', 'end-1c'), encoding='utf-8')
             except OSError as exc:
-                messagebox.showerror('Ошибка сохранения', str(exc))
+                self.say(str(exc), error=True)
+
+    def pause(self):
+        if self.timer is not None:
+            self.root.after_cancel(self.timer)
+            self.timer = None
 
     def build(self):
+        """Assemble the editor text, load it into memory and reset the processor."""
         self.pause()
+        text = self.editor.get('1.0', 'end-1c')
+        self.editor.tag_remove('error', '1.0', 'end')
         try:
-            text = self.editor.get('1.0', 'end-1c')
-            program = assemble(text)
-        except ValueError as exc:
-            self.cpu = None
-            messagebox.showerror('Ошибка ассемблера', str(exc))
+            self.program = assemble(text)
+        except AsmError as exc:
+            self.program = self.built_text = None
+            self.editor.tag_remove('next', '1.0', 'end')
+            self.editor.tag_add('error', f'{exc.line}.0', f'{exc.line}.end+1c')
+            self.editor.see(f'{exc.line}.0')
+            self.say(f'Assembly error: {exc}', error=True)
             return False
-        self.program, self.cpu, self.built_text = program, CPU(program), text
-        self.log.configure(state='normal')
-        self.log.delete('1.0', 'end')
-        self.log.configure(state='disabled')
-        self.refresh()
+        self.built_text = text
+        self.say(f'Assembled: {len(self.program.lines)} instructions, '
+                 f'{len(self.program.image)} memory cells loaded')
+        self.reset()
         return True
 
-    def step(self):
+    def reset(self):
+        """Processor to the initial state, memory back to the assembled program."""
         self.pause()
-        self.advance()
+        if self.program is None:
+            return
+        self.cpu.reset(self.program.image)
+        self.write_log()
+        self.refresh(everything=True)
+
+    def ready(self):
+        """Reassemble when the text was edited after the last build."""
+        if self.program is None or self.editor.get('1.0', 'end-1c') != self.built_text:
+            return self.build()
+        return True
 
     def advance(self):
-        if self.cpu is None or self.editor.get('1.0', 'end-1c') != self.built_text:
-            if not self.build():
-                return False
-        try:
-            message = self.cpu.step()
-        except ValueError as exc:
-            self.pause()
-            messagebox.showerror('Ошибка процессора', str(exc))
+        """Execute one instruction; False when the run has to stop."""
+        if self.cpu.halted:
             return False
-        self.log.configure(state='normal')
-        self.log.insert('end', message + '\n')
-        if int(self.log.index('end-1c').split('.')[0]) > 300:
-            self.log.delete('1.0', '2.0')
-        self.log.see('end')
-        self.log.configure(state='disabled')
+        try:
+            self.write_log(self.cpu.step())
+        except CPUError as exc:
+            self.cpu.halted = True
+            self.say(f'Processor error: {exc}', error=True)
+            self.refresh()
+            return False
+        if self.cpu.executed >= STEP_LIMIT and not self.cpu.halted:
+            self.cpu.halted = True
+            self.say(f'Stopped after {STEP_LIMIT} instructions: endless loop?', error=True)
         self.refresh()
         return not self.cpu.halted
 
+    def step(self):
+        self.pause()
+        if self.ready():
+            self.advance()
+
     def run(self):
         self.pause()
-        if self.cpu is None or self.editor.get('1.0', 'end-1c') != self.built_text:
-            if not self.build():
-                return
-        if self.cpu.halted:
-            return
-        self.running = True
-        self.tick()
+        if self.ready():
+            self.tick()
 
     def tick(self):
         self.timer = None
-        if self.running and self.advance():
+        if self.advance():
             try:
-                delay = max(1, min(2000, self.delay.get()))
-            except (ValueError, tk.TclError):
-                delay = 100
+                delay = max(0, min(2000, self.delay.get()))
+            except tk.TclError:
+                delay = 150
             self.timer = self.root.after(delay, self.tick)
-        else:
-            self.running = False
 
-    def refresh(self):
-        c = self.cpu
-        status = 'HALT' if c.halted else c.phase
-        self.state.set(f'Следующий этап: {status}     Выполнено команд: {c.instructions}\nPC={c.pc}  IR=0x{c.ir:08X}  MAR={c.mar}  MDR=0x{c.mdr:08X}\nZ={int(c.z)} C={int(c.c)} GT={int(c.gt)} LT={int(c.lt)}\n' + '  '.join(f'R{i}={v}' for i, v in enumerate(c.r[:4])) + '\n' + '  '.join(f'R{i+4}={v}' for i, v in enumerate(c.r[4:])))
-        active = {'Выборка': 'memory', 'Декодирование': 'control', 'Выполнение': 'alu'}.get(c.phase)
-        for key, item in self.boxes.items():
-            self.canvas.itemconfigure(item, fill='#bfdbfe' if key == active and not c.halted else 'white')
+    # --- drawing the state ----------------------------------------------------------------
+
+    def memory_row(self, addr, labels):
+        word = self.cpu.mem[addr]
+        meaning = ''
+        if addr in self.program.lines:
+            try:
+                meaning = disassemble(decode(word << 16 | self.cpu.mem[addr + 1]))
+            except DecodeError:
+                meaning = 'not an instruction'
+        elif addr - 1 in self.program.lines:
+            meaning = '  (second half)'
+        elif addr in self.program.image:
+            meaning = 'data'
+        self.memory.item(str(addr), values=(f'0x{addr:03X}', labels.get(addr, ''), f'{word:04X}', word, meaning))
+
+    def refresh(self, everything=False):
+        cpu = self.cpu
         labels = {}
         for name, addr in self.program.labels.items():
-            labels[addr] = labels.get(addr, '') + name + ' '
-        for addr, value in enumerate(c.memory):
-            values = (addr, labels.get(addr, ''), f'{value:08X}', value)
-            if self.memory.exists(str(addr)):
-                self.memory.item(str(addr), values=values)
-            else:
-                self.memory.insert('', 'end', iid=str(addr), values=values)
-        self.editor.tag_remove('current', '1.0', 'end')
-        addr = c.pc if c.phase == 'Выборка' and not c.halted else c.mar
-        line = self.program.source.get(addr)
-        if line:
-            self.editor.tag_add('current', f'{line}.0', f'{line}.end')
-            self.editor.see(f'{line}.0')
-        if 'result' in self.program.labels:
-            start = self.program.labels['result']
-            count = 11 if 'a' in self.program.labels and 'b' in self.program.labels else 1
-            values = c.memory[start:start+count]
-            self.result.set(('Результат: ' if c.halted else 'Промежуточное значение result: ') + ', '.join(map(str, values)))
+            labels[addr] = f'{labels[addr]}, {name}' if addr in labels else name
+
+        self.pc_label.configure(text=f'0x{cpu.pc:03X}  ({cpu.pc})')
+        if cpu.ir_addr is None:
+            self.ir_code.configure(text='-')
+            self.ir_asm.configure(text='nothing executed yet')
+            for title, bits, meaning in self.field_cells:
+                bits.configure(text='')
+                meaning.configure(text='')
+            for cells, (title, _, _) in zip(self.field_cells, describe_fields(0)):
+                cells[0].configure(text=title)
         else:
-            self.result.set('Результаты доступны в памяти и регистрах')
+            try:
+                text = disassemble(decode(cpu.ir))
+            except DecodeError:
+                text = 'not an instruction'
+            self.ir_code.configure(text=f'0x{cpu.ir:08X}')
+            self.ir_asm.configure(text=text)
+            for cells, (title, bits, meaning) in zip(self.field_cells, describe_fields(cpu.ir)):
+                cells[0].configure(text=title)
+                cells[1].configure(text=bits)
+                cells[2].configure(text=meaning)
+        for key, label in self.flag_labels.items():
+            label.configure(text=str(getattr(cpu, key)))
+        for n, (hexa, dec) in enumerate(self.reg_labels):
+            colour = CHANGED if n in cpu.changed_regs else PANEL
+            hexa.configure(text=f'0x{cpu.reg[n]:04X}', bg=colour)
+            dec.configure(text=str(cpu.reg[n]), bg=colour)
+        self.state_label.configure(text=f'Instructions executed: {cpu.executed}      State: '
+                                        + ('halted' if cpu.halted else 'ready for the next instruction'))
+
+        # Memory: redraw only what changed, move the highlights.
+        for addr in (range(MEM_SIZE) if everything else cpu.changed_mem):
+            self.memory_row(addr, labels)
+        for addr in self.marked:
+            self.memory.item(str(addr), tags=())
+        self.marked = set(cpu.changed_mem)
+        for addr in cpu.changed_mem:
+            self.memory.item(str(addr), tags=('changed',))
+        if not cpu.halted:
+            for addr in range(cpu.pc, min(cpu.pc + INSTR_CELLS, MEM_SIZE)):
+                self.memory.item(str(addr), tags=('next',))
+                self.marked.add(addr)
+        focus = min(cpu.changed_mem) if cpu.changed_mem else min(cpu.pc, MEM_SIZE - 1)
+        self.memory.see(str(focus))
+
+        # Editor: highlight the line of the instruction that runs next.
+        self.editor.tag_remove('next', '1.0', 'end')
+        line = None if cpu.halted else self.program.lines.get(cpu.pc)
+        if line and self.editor.get('1.0', 'end-1c') == self.built_text:
+            self.editor.tag_add('next', f'{line}.0', f'{line}.end+1c')
+            self.editor.see(f'{line}.0')
+
 
 if __name__ == '__main__':
-    root = tk.Tk()
-    App(root)
-    root.mainloop()
+    window = tk.Tk()
+    App(window)
+    window.mainloop()

@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Эмулятор процессора — конспект, вариант 11</title>
+<style>
+  @page { size: A4; margin: 20mm 19mm 20mm 19mm;
+          @bottom-right { content: counter(page); font: 8.5pt "Noto Sans"; color: #8a8f98; } }
+  @page :first { @bottom-right { content: none; } }
+  :root { --ink: #16181d; --muted: #6b7280; --line: #dfe2e7; --soft: #f4f5f7;
+          --accent: #2f55c8; --accent-soft: #edf1fb; --mark: #fff1c2; }
+  * { box-sizing: border-box; }
+  html { font: 10pt/1.5 "Noto Sans", sans-serif; color: var(--ink); }
+  body { margin: 0; }
+  p { margin: 0 0 7pt; }
+  code, pre, .mono { font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", "DejaVu Sans Mono", monospace; }
+  code { font-size: 0.9em; background: var(--soft); padding: 0.5pt 3pt; border-radius: 2.5pt; white-space: nowrap; }
+  b { font-weight: 600; }
+  em { font-style: normal; color: var(--accent); font-weight: 500; }
+
+  /* cover */
+  .cover { height: 255mm; display: flex; flex-direction: column; break-after: page; }
+  .cover .tag { font-size: 8.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .cover h1 { font-size: 40pt; line-height: 1.08; font-weight: 600; letter-spacing: -0.02em; margin: 58mm 0 6mm; }
+  .cover .sub { font-size: 13pt; color: var(--muted); max-width: 120mm; line-height: 1.45; }
+  .facts { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1pt solid var(--ink); margin-top: 22mm; }
+  .facts div { padding: 8pt 8pt 0 0; }
+  .facts span { display: block; font-size: 7.5pt; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2pt; }
+  .facts b { font-size: 10.5pt; font-weight: 500; line-height: 1.3; display: block; }
+  .toc { margin-top: auto; columns: 2; column-gap: 12mm; font-size: 9.5pt; }
+  .toc div { display: flex; gap: 8pt; padding: 2.6pt 0; border-bottom: 0.5pt solid var(--line); break-inside: avoid; }
+  .toc i { font-style: normal; color: var(--accent); font-weight: 600; width: 14pt; }
+
+  /* sections */
+  h2 { font-size: 19pt; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; margin: 0 0 3pt; break-after: avoid; }
+  h2 i { font-style: normal; color: var(--accent); margin-right: 8pt; }
+  section { break-before: page; }
+  section.flow { break-before: auto; margin-top: 22pt; }
+  .lead { font-size: 11pt; color: var(--muted); margin: 0 0 14pt; max-width: 150mm; line-height: 1.45; }
+  h3 { font-size: 10.5pt; font-weight: 600; margin: 15pt 0 5pt; break-after: avoid; }
+  h3 span { color: var(--muted); font-weight: 400; }
+
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9pt; break-inside: avoid; }
+  th { text-align: left; font-weight: 600; font-size: 7.5pt; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+       border-bottom: 1pt solid var(--ink); padding: 3pt 8pt 4pt 0; vertical-align: bottom; }
+  td { border-bottom: 0.5pt solid var(--line); padding: 4pt 8pt 4pt 0; vertical-align: top; }
+  td code { background: none; padding: 0; }
+  tr:last-child td { border-bottom: none; }
+  .tight td { padding-top: 2.6pt; padding-bottom: 2.6pt; }
+
+  pre { font-size: 8.3pt; line-height: 1.5; background: var(--soft); border-radius: 4pt; padding: 9pt 11pt; margin: 6pt 0 10pt;
+        white-space: pre; break-inside: avoid; overflow: hidden; }
+  pre .c { color: #8a8f98; }
+  pre .k { color: var(--accent); font-weight: 600; }
+  pre .m { background: var(--mark); }
+
+  .note { border-left: 2pt solid var(--accent); background: var(--accent-soft); padding: 7pt 11pt; margin: 9pt 0 11pt; border-radius: 0 4pt 4pt 0; break-inside: avoid; }
+  .note p:last-child { margin: 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 9mm; }
+  .cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6mm; }
+  ul { margin: 3pt 0 8pt; padding-left: 13pt; }
+  li { margin-bottom: 2.5pt; }
+  li::marker { color: var(--accent); }
+
+  /* bit-field diagram */
+  .bits { display: flex; margin: 8pt 1pt 3pt 0; font-size: 8.5pt; break-inside: avoid; }
+  .bits div { border: 0.8pt solid var(--ink); border-left: none; text-align: center; padding: 6pt 0 5pt; position: relative; }
+  .bits div:first-child { border-left: 0.8pt solid var(--ink); }
+  .bits b { display: block; font-size: 10.5pt; }
+  .bits span { color: var(--muted); font-size: 7.5pt; }
+  .bits .hi { background: var(--accent-soft); }
+  .bitnum { display: flex; font-size: 7pt; color: var(--muted); margin-right: 1pt; }
+  .bitnum div { display: flex; justify-content: space-between; padding: 0 2pt; }
+  .w8 { width: 25%; } .w2 { width: 6.25%; } .w4 { width: 12.5%; } .w12 { width: 37.5%; }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin: 8pt 0 12pt; break-inside: avoid; }
+  .steps div { border-top: 1pt solid var(--ink); padding: 7pt 12pt 0 0; }
+  .steps i { font-style: normal; color: var(--accent); font-weight: 600; font-size: 8pt; letter-spacing: 0.08em; text-transform: uppercase; display: block; }
+  .steps b { display: block; margin: 1pt 0 2pt; }
+  .steps span { font-size: 9pt; color: #3a3f47; }
+
+  .qa { columns: 2; column-gap: 9mm; }
+  .qa div { break-inside: avoid; margin-bottom: 9pt; }
+  .qa b { display: block; margin-bottom: 1pt; }
+  .qa span { font-size: 9.2pt; color: #30343b; }
+  figure { margin: 8pt 0 10pt; break-inside: avoid; }
+  figure img { width: 100%; border: 0.5pt solid var(--line); border-radius: 4pt; display: block; }
+  figcaption { font-size: 8.3pt; color: var(--muted); margin-top: 4pt; }
+  svg text { font-family: "Noto Sans", sans-serif; }
+  .r { text-align: right; } .c { text-align: center; }
+  .small { font-size: 8.8pt; color: #3a3f47; }
+  .nowrap td, .nowrap th { white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<!-- ===================================================================== -->
+<div class="cover">
+  <div class="tag">Конспект к практике · РПАО ИАС</div>
+  <h1>Эмулятор<br>процессора</h1>
+  <div class="sub">Всё, что нужно понимать, чтобы написать, объяснить и защитить работу: от ячейки памяти до длинной арифметики.</div>
+  <div class="facts">
+    <div><span>Вариант</span><b>11</b></div>
+    <div><span>Адресность</span><b>трёхадресная</b></div>
+    <div><span>Архитектура</span><b>фон Неймана</b></div>
+    <div><span>Задание 1</span><b>максимум в массиве</b></div>
+    <div><span>Задание 2</span><b>свёртка, 6 элементов, без знака</b></div>
+  </div>
+  <div class="toc">
+    <div><i>1</i>Что нужно сдать</div>
+    <div><i>2</i>Машина: память, регистры, цикл</div>
+    <div><i>3</i>Числа и флаги</div>
+    <div><i>4</i>Система команд</div>
+    <div><i>5</i>Как процессор читает команду</div>
+    <div><i>6</i>Условия и циклы</div>
+    <div><i>7</i>Длинная арифметика</div>
+    <div><i>8</i>Программа 1: максимум</div>
+    <div><i>9</i>Программа 2: свёртка</div>
+    <div><i>10</i>Ассемблер</div>
+    <div><i>11</i>Эмулятор</div>
+    <div><i>12</i>Вопросы на защите</div>
+    <div><i>13</i>Шпаргалка</div>
+  </div>
+</div>
+
+<!-- ===================================================================== -->
+<section style="break-before:auto">
+<h2><i>1</i>Что нужно сдать</h2>
+<p class="lead">Одна программа — эмулятор процессора, который мы сами придумали, — и отчёт по ней.</p>
+
+<p>Эмулятор — это программа, которая ведёт себя как процессор: хранит в переменных его память и регистры и шаг за шагом выполняет команды, меняя эти переменные. На экране видно, что изменилось после каждой команды.</p>
+<p>Не путайте два языка. <b>Python</b> — язык, на котором написан эмулятор. <b>Ассемблер</b> — язык, на котором написаны программы <em>для</em> эмулируемого процессора.</p>
+
+<h3>Требования пособия и как они выполнены</h3>
+<table class="tight">
+<tr><th style="width:47%">Требование</th><th>У нас</th></tr>
+<tr><td>Трёхадресные команды</td><td>Каждая команда содержит поля A1, A2, A3: результат и два операнда</td></tr>
+<tr><td>Архитектура фон Неймана</td><td>Одна память на 4096 ячеек, в ней и команды, и данные</td></tr>
+<tr><td>RISC: фиксированная длина; с памятью работают только пересылки</td><td>Все команды по 32 бита, один формат; память трогает только <code>MOV</code></td></tr>
+<tr><td>Четыре типа адресации: непосредственная, регистровая, прямая, косвенно-регистровая</td><td>Все четыре, тип виден по записи операнда: <code>5</code>, <code>R1</code>, <code>[max]</code>, <code>[R0]</code></td></tr>
+<tr><td>Пересылки, арифметика и логика, длинная арифметика, условные переходы</td><td><code>MOV</code>; <code>ADD SUB MUL AND…</code>; <code>ADC SBB MULH</code>; <code>JZ JNZ JC JNC…</code></td></tr>
+<tr><td>На экране: регистры (включая аккумулятор и счётчик), счётчик команд, регистр команд с полями и ассемблерной записью, флаги</td><td>Всё показано и подписано; R1 — аккумулятор, R2 — счётчик цикла</td></tr>
+<tr><td>Массив в памяти, первый элемент — его размер, обработка в цикле</td><td><code>arr: .word 6, 12, 7, 99, 4, 31, 18</code></td></tr>
+<tr><td>Пользователь вводит программу на ассемблере, эмулятор сам переводит её в машинный код</td><td>Редактор в окне и встроенный ассемблер</td></tr>
+<tr><td>Числа без знака (варианты 8–16)</td><td>Все числа 0…65535, сравнение через флаг переноса</td></tr>
+</table>
+
+<h3>План работы из пособия</h3>
+<div class="steps">
+  <div><i>Шаг 1</i><b>Программа на бумаге</b><span>Решить, где лежат данные и команды, сколько регистров и какого размера. Написать обе программы на ассемблере.</span></div>
+  <div><i>Шаг 2</i><b>Кодировка команд</b><span>Придумать формат машинного слова и то, как в нём записан тип адресации. Перевести программы в машинные коды.</span></div>
+  <div><i>Шаг 3</i><b>Эмулятор с парсером</b><span>Программа, которая разбирает ассемблер, кладёт машинные коды в память и исполняет их.</span></div>
+</div>
+<div class="note"><p><b>Свёртка</b> в пособии — это не «свёртка сигналов» с 11 результатами, а одно число, сумма попарных произведений (формула 4.1): S = A₁·B₁ + A₂·B₂ + … + A<sub>N</sub>·B<sub>N</sub>. В математике это называется скалярным произведением.</p></div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>2</i>Машина: память, регистры, цикл</h2>
+<p class="lead">Процессор умеет одно: взять команду из памяти, выполнить её и перейти к следующей.</p>
+
+<svg viewBox="0 0 660 232" width="100%" style="margin:2pt 0 8pt">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16181d"/></marker></defs>
+  <g fill="none" stroke="#16181d" stroke-width="1">
+    <rect x="1" y="1" width="170" height="230" rx="5"/>
+    <rect x="250" y="1" width="409" height="230" rx="5" stroke-dasharray="3 3" stroke="#9aa0aa"/>
+    <rect x="270" y="38" width="110" height="38" rx="4"/>
+    <rect x="270" y="98" width="110" height="38" rx="4"/>
+    <rect x="270" y="172" width="110" height="38" rx="4" fill="#edf1fb"/>
+    <rect x="428" y="38" width="100" height="98" rx="4"/>
+    <rect x="556" y="58" width="86" height="58" rx="4" fill="#edf1fb"/>
+    <rect x="556" y="172" width="86" height="38" rx="4"/>
+    <line x1="270" y1="57" x2="174" y2="57" marker-end="url(#a)"/>
+    <line x1="171" y1="117" x2="267" y2="117" marker-end="url(#a)"/>
+    <line x1="325" y1="136" x2="325" y2="169" marker-end="url(#a)"/>
+    <line x1="528" y1="87" x2="553" y2="87" marker-end="url(#a)" marker-start="url(#a)"/>
+    <line x1="599" y1="116" x2="599" y2="169" marker-end="url(#a)"/>
+    <path d="M380 191 H478 V139" marker-end="url(#a)"/>
+    <path d="M171 200 H230 V152 H425" stroke="#2f55c8" marker-end="url(#a)" marker-start="url(#a)"/>
+  </g>
+  <g fill="#edf1fb" stroke="#16181d" stroke-width="0.6">
+    <rect x="14" y="40" width="144" height="62"/>
+  </g>
+  <g fill="#f4f5f7" stroke="#16181d" stroke-width="0.6"><rect x="14" y="126" width="144" height="44"/></g>
+  <rect x="14" y="170" width="144" height="48" fill="none" stroke="#16181d" stroke-width="0.6" stroke-dasharray="2 2"/>
+  <g font-size="10.5" fill="#16181d">
+    <text x="14" y="22" font-weight="600">Память (ОЗУ)</text>
+    <text x="14" y="34" font-size="8" fill="#6b7280">4096 ячеек × 16 бит</text>
+    <text x="22" y="66" font-size="9.5">команды</text><text x="22" y="80" font-size="8" fill="#6b7280">с адреса 0x000</text>
+    <text x="22" y="119" font-size="8" fill="#6b7280">…</text>
+    <text x="22" y="145" font-size="9.5">данные (массивы)</text><text x="22" y="158" font-size="8" fill="#6b7280">с адреса 0x100</text>
+    <text x="22" y="198" font-size="8" fill="#6b7280">свободно до 0xFFF</text>
+    <text x="262" y="22" font-weight="600">Процессор</text>
+    <text x="325" y="54" text-anchor="middle" font-weight="600">PC</text><text x="325" y="67" text-anchor="middle" font-size="8" fill="#6b7280">счётчик команд</text>
+    <text x="325" y="114" text-anchor="middle" font-weight="600">IR</text><text x="325" y="127" text-anchor="middle" font-size="8" fill="#6b7280">регистр команд</text>
+    <text x="325" y="188" text-anchor="middle" font-weight="600">Дешифратор</text><text x="325" y="201" text-anchor="middle" font-size="8" fill="#6b7280">устройство управления</text>
+    <text x="478" y="78" text-anchor="middle" font-weight="600">R0 … R15</text><text x="478" y="92" text-anchor="middle" font-size="8" fill="#6b7280">регистры общего</text><text x="478" y="102" text-anchor="middle" font-size="8" fill="#6b7280">назначения</text>
+    <text x="599" y="84" text-anchor="middle" font-weight="600">АЛУ</text><text x="599" y="97" text-anchor="middle" font-size="8" fill="#6b7280">+ − × И ИЛИ</text>
+    <text x="599" y="188" text-anchor="middle" font-weight="600">Z C S</text><text x="599" y="201" text-anchor="middle" font-size="8" fill="#6b7280">флаги</text>
+    <text x="222" y="50" text-anchor="middle" font-size="8" fill="#6b7280">адрес</text>
+    <text x="220" y="110" text-anchor="middle" font-size="8" fill="#6b7280">команда</text>
+    <text x="176" y="194" font-size="8" fill="#2f55c8">MOV: данные</text>
+  </g>
+</svg>
+
+<div class="cols">
+<div>
+<h3 style="margin-top:4pt">Память</h3>
+<p>Память — это пронумерованные ячейки. Номер ячейки — <b>адрес</b>, то, что в ней лежит, — <b>содержимое</b>. Это разные вещи: по адресу <code>0x107</code> может лежать число 99.</p>
+<p>Чтобы различать N ячеек, адрес должен иметь log₂N бит. У нас 4096 = 2¹² ячеек, значит адрес — 12 бит.</p>
+<p><b>Фон Нейман:</b> команды и данные лежат в одной памяти, в разных её частях. Команда — такое же число, как и данные; программа может прочитать и даже переписать саму себя.</p>
+<p><b>Гарвардская:</b> две отдельные памяти — для команд и для данных. Адрес 5 в одной и адрес 5 в другой — разные ячейки. Читать их можно одновременно, зато нельзя отдать данным место, не занятое командами.</p>
+</div>
+<div>
+<h3 style="margin-top:4pt">Регистры</h3>
+<p>Регистр — быстрая ячейка внутри самого процессора. Арифметика выполняется только над регистрами.</p>
+<table class="tight">
+<tr><td><b>R0…R15</b></td><td>Общего назначения (РОН), по 16 бит. Хранят числа, адреса, счётчики</td></tr>
+<tr><td><b>PC</b></td><td>Счётчик команд: адрес <em>следующей</em> команды</td></tr>
+<tr><td><b>IR</b></td><td>Регистр команд: команда, которая <em>сейчас</em> исполняется, 32 бита</td></tr>
+<tr><td><b>Z C S</b></td><td>Флаги: по одному биту о результате последней операции</td></tr>
+</table>
+<p class="small">«Аккумулятор» и «счётчик» — это роли. В наших программах R1 накапливает ответ, R2 считает оставшиеся итерации.</p>
+</div>
+</div>
+
+<h3>Цикл исполнения команды</h3>
+<div class="steps">
+  <div><i>1 · Выборка</i><b>IR ← память[PC]</b><span>Команда — 32 бита, ячейка — 16, поэтому читаются две ячейки по адресу PC. Сразу после этого PC ← PC + 2: он уже указывает на следующую команду.</span></div>
+  <div><i>2 · Декодирование</i><b>IR → поля</b><span>Дешифратор разрезает IR на поля: код операции, типы адресации, A1, A2, A3.</span></div>
+  <div><i>3 · Исполнение</i><b>действие</b><span>АЛУ считает и ставит флаги, результат пишется в регистр; или <code>MOV</code> обращается к памяти; или переход записывает в PC новый адрес.</span></div>
+</div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>3</i>Числа и флаги</h2>
+<p class="lead">В регистре 16 бит. Всё, что в них не помещается, уходит во флаг переноса — и на этом держится и сравнение, и длинная арифметика.</p>
+
+<div class="cols">
+<div>
+<h3 style="margin-top:0">Беззнаковое 16-битное число</h3>
+<p>16 бит дают 2¹⁶ = 65 536 комбинаций: числа от 0 до 65 535 (<code>0x0000</code>…<code>0xFFFF</code>).</p>
+<p>Одна шестнадцатеричная цифра — ровно 4 бита, поэтому 16 бит — это 4 цифры:</p>
+<pre>50000 = <span class="k">C</span>    <span class="k">3</span>    <span class="k">5</span>    <span class="k">0</span>
+        1100 0011 0101 0000</pre>
+</div>
+<div>
+<h3 style="margin-top:0">Перенос и заём</h3>
+<pre>  0xFFFF        0x0003
++ 0x0001      − 0x0005
+────────      ────────
+<span class="m">1</span> 0x0000      <span class="m">1</span> 0xFFFE
+↑ C = 1       ↑ C = 1 (заём)</pre>
+<p>Регистр хранит только младшие 16 бит. «Лишний» 17-й бит не теряется: он попадает во флаг C.</p>
+</div>
+</div>
+
+<h3>Флаги</h3>
+<table>
+<tr><th style="width:9%">Флаг</th><th style="width:22%">Название</th><th>Равен 1, когда</th></tr>
+<tr><td><b>Z</b></td><td>Zero, флаг нуля</td><td>результат равен нулю</td></tr>
+<tr><td><b>C</b></td><td>Carry, флаг переноса</td><td>сложение: результат не поместился в 16 бит; вычитание: пришлось занимать (уменьшаемое меньше вычитаемого); умножение: произведение больше 65 535</td></tr>
+<tr><td><b>S</b></td><td>Sign, флаг знака</td><td>старший (15-й) бит результата равен 1</td></tr>
+</table>
+<p>Флаги меняют только арифметико-логические команды. <code>MOV</code> и переходы их не трогают — поэтому между вычислением и условным переходом можно спокойно пересылать данные.</p>
+
+<h3>Сравнение беззнаковых чисел</h3>
+<p><code>CMP X, Y</code> — это вычитание X − Y, результат которого выбрасывается. Остаются только флаги:</p>
+<table class="tight" style="width:70%">
+<tr><th>Флаги после CMP X, Y</th><th>Вывод</th><th>Переход</th></tr>
+<tr><td>Z = 1</td><td>X = Y</td><td><code>JZ</code></td></tr>
+<tr><td>Z = 0</td><td>X ≠ Y</td><td><code>JNZ</code></td></tr>
+<tr><td>C = 1</td><td>X &lt; Y (был заём)</td><td><code>JC</code></td></tr>
+<tr><td>C = 0</td><td>X ≥ Y</td><td><code>JNC</code></td></tr>
+</table>
+
+<div class="note">
+<p><b>А если бы числа были со знаком (варианты 1–7)?</b> Отрицательные числа хранят в дополнительном коде: −x = (инверсия всех битов x) + 1. Например, −1 = <code>0xFFFF</code>. Сумматору всё равно — он складывает биты одинаково; меняется только толкование. Старший бит становится знаком (флаг S), а переполнение ловит отдельный флаг OF, потому что C для знаковых чисел ничего не значит. Для сравнения нужны были бы переходы по S и OF, а для умножения — отдельная знаковая команда. В нашем варианте числа без знака, поэтому хватает Z и C.</p>
+</div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>4</i>Система команд</h2>
+<p class="lead">Набор всего, что процессор умеет, и правило, как каждая команда записана числом.</p>
+
+<h3 style="margin-top:0">Адресность <span>— сколько адресов указано в команде</span></h3>
+<p>Одно и то же действие C = A + B в машинах разной адресности:</p>
+<table class="tight">
+<tr><th style="width:19%">Адресность</th><th style="width:33%">Программа</th><th>Где операнды и результат</th></tr>
+<tr><td><b>Трёхадресная</b></td><td><code>ADD C, A, B</code></td><td>Всё указано явно: результат и оба операнда. <em>Наш вариант</em></td></tr>
+<tr><td>Двухадресная</td><td><code>MOV C, A</code> · <code>ADD C, B</code></td><td>Результат ложится на место первого операнда</td></tr>
+<tr><td>Одноадресная</td><td><code>LDA A</code> · <code>ADD B</code> · <code>STA C</code></td><td>Первый операнд и результат — всегда в аккумуляторе</td></tr>
+<tr><td>Безадресная</td><td><code>PUSH A</code> · <code>PUSH B</code> · <code>ADD</code></td><td>Операнды на вершине стека, результат туда же</td></tr>
+</table>
+<p>Чем меньше адресов, тем короче и проще команда, но тем больше команд нужно на ту же работу.</p>
+
+<h3>RISC <span>— сокращённый набор команд</span></h3>
+<ul>
+  <li>Все команды одной длины — их легко выбирать и декодировать.</li>
+  <li>С памятью работают только пересылки. Арифметика берёт операнды из регистров или из самой команды.</li>
+  <li>Поэтому все команды выполняются примерно за одно время, а процессор проще и быстрее. В CISC (x86) команда вида «прибавь к ячейке памяти» допустима, но команды получаются разной длины и длительности.</li>
+</ul>
+
+<h3>Формат команды <span>— 32 бита, один для всех</span></h3>
+<div class="bitnum"><div class="w8"><span>31</span><span>24</span></div><div class="w2"><span>23</span></div><div class="w2"><span>21</span></div><div class="w4"><span>19</span><span>16</span></div><div class="w4"><span>15</span><span>12</span></div><div class="w12"><span>11</span><span>0</span></div></div>
+<div class="bits">
+  <div class="w8 hi"><b>КОП</b><span>8 бит</span></div>
+  <div class="w2"><b>ТП</b><span>2</span></div>
+  <div class="w2"><b>ТИ</b><span>2</span></div>
+  <div class="w4"><b>A1</b><span>4 бита</span></div>
+  <div class="w4"><b>A2</b><span>4 бита</span></div>
+  <div class="w12"><b>A3</b><span>12 бит</span></div>
+</div>
+<table class="tight" style="margin-top:8pt">
+<tr><td style="width:9%"><b>КОП</b></td><td>Код операции: что делать. 8 бит — до 256 команд</td></tr>
+<tr><td><b>ТП, ТИ</b></td><td>Тип адресации приёмника и источника: как понимать операнд</td></tr>
+<tr><td><b>A1</b></td><td>Номер регистра для результата. 4 бита — 16 регистров</td></tr>
+<tr><td><b>A2</b></td><td>Номер регистра с первым операндом</td></tr>
+<tr><td><b>A3</b></td><td>Второй операнд: номер регистра, число или адрес. 12 бит — число до 4095 или любой адрес памяти</td></tr>
+</table>
+<p>Смысл команды: <b>A1 ← A2 операция A3</b>. Если поле команде не нужно, в нём нули — формат от этого не меняется.</p>
+<div class="note"><p>Границы полей совпадают с шестнадцатеричными цифрами, поэтому машинный код читается глазами: <code>КК Т 1 2 333</code>. Цифра Т — это ТП и ТИ вместе. Пример: <code>0x10111001</code> → КОП <code>10</code> (ADD), Т <code>1</code> (число), A1 <code>1</code>, A2 <code>1</code>, A3 <code>001</code> → <code>ADD R1, R1, 1</code>.</p></div>
+</section>
+
+<section>
+<h3 style="margin-top:0">Типы адресации <span>— где лежит операнд</span></h3>
+<p>Пусть R2 = <code>0x0105</code>, а в ячейке памяти <code>0x105</code> лежит число 99. Четыре команды отличаются только типом источника:</p>
+<table>
+<tr><th style="width:6%">Код</th><th style="width:23%">Тип</th><th style="width:21%">Ассемблер</th><th style="width:17%">Машинный код</th><th>Что попадёт в R1</th></tr>
+<tr><td><code>01</code></td><td>Непосредственная</td><td><code>MOV R1, 12</code></td><td><code>01 1 1 0 00C</code></td><td>12 — число из самой команды</td></tr>
+<tr><td><code>00</code></td><td>Регистровая</td><td><code>MOV R1, R2</code></td><td><code>01 0 1 0 002</code></td><td><code>0x0105</code> — содержимое R2</td></tr>
+<tr><td><code>10</code></td><td>Прямая</td><td><code>MOV R1, [0x105]</code></td><td><code>01 2 1 0 105</code></td><td>99 — ячейка, адрес которой в команде</td></tr>
+<tr><td><code>11</code></td><td>Косвенно-регистровая</td><td><code>MOV R1, [R2]</code></td><td><code>01 3 1 0 002</code></td><td>99 — ячейка, адрес которой в R2</td></tr>
+</table>
+<p>Квадратные скобки означают «содержимое памяти по этому адресу». Косвенная адресация нужна для массивов: адрес лежит в регистре, его можно увеличивать и так идти по элементам.</p>
+<p>Запись в память — та же команда <code>MOV</code>, только тип «память» стоит у приёмника: <code>MOV [0x105], R1</code> → <code>01 8 1 0 105</code>, <code>MOV [R2], R1</code> → <code>01 C 1 0 002</code>. У <code>MOV</code> одна сторона всегда регистр (его номер в A1), вторая описана в A3; направление задают ТП и ТИ.</p>
+<p>Имя метки без скобок — это её адрес как число: <code>MOV R0, arr</code> кладёт в R0 адрес массива, а <code>MOV R0, [arr]</code> — его первый элемент.</p>
+
+<h3>Команды</h3>
+<table class="tight">
+<tr><th style="width:8%">КОП</th><th style="width:25%">Команда</th><th style="width:40%">Действие</th><th>Флаги</th></tr>
+<tr><td><code>00</code></td><td><code>HLT</code></td><td>останов</td><td>—</td></tr>
+<tr><td><code>01</code></td><td><code>MOV приёмник, источник</code></td><td>пересылка; единственная команда, работающая с памятью</td><td>—</td></tr>
+<tr><td><code>10</code></td><td><code>ADD A1, A2, A3</code></td><td>A1 ← A2 + A3</td><td>Z C S</td></tr>
+<tr><td><code>11</code></td><td><code>ADC A1, A2, A3</code></td><td>A1 ← A2 + A3 + C</td><td>Z C S</td></tr>
+<tr><td><code>12</code></td><td><code>SUB A1, A2, A3</code></td><td>A1 ← A2 − A3</td><td>Z C S</td></tr>
+<tr><td><code>13</code></td><td><code>SBB A1, A2, A3</code></td><td>A1 ← A2 − A3 − C</td><td>Z C S</td></tr>
+<tr><td><code>14</code></td><td><code>MUL A1, A2, A3</code></td><td>A1 ← младшие 16 бит A2 × A3</td><td>Z C S</td></tr>
+<tr><td><code>15</code></td><td><code>MULH A1, A2, A3</code></td><td>A1 ← старшие 16 бит A2 × A3</td><td>Z C S</td></tr>
+<tr><td><code>16</code></td><td><code>CMP A2, A3</code></td><td>A2 − A3, результат не сохраняется</td><td>Z C S</td></tr>
+<tr><td><code>20 21 22</code></td><td><code>AND</code> <code>OR</code> <code>XOR</code></td><td>поразрядные И, ИЛИ, исключающее ИЛИ</td><td>Z S, C = 0</td></tr>
+<tr><td><code>23 24</code></td><td><code>SHL</code> <code>SHR</code></td><td>логический сдвиг влево и вправо на A3 бит</td><td>Z S, C = выдвинутый бит</td></tr>
+<tr><td><code>30</code></td><td><code>JMP метка</code></td><td>PC ← адрес, всегда</td><td>—</td></tr>
+<tr><td><code>31 32</code></td><td><code>JZ</code> <code>JNZ</code></td><td>переход, если Z = 1 / Z = 0</td><td>—</td></tr>
+<tr><td><code>33 34</code></td><td><code>JC</code> <code>JNC</code></td><td>переход, если C = 1 / C = 0</td><td>—</td></tr>
+<tr><td><code>35 36</code></td><td><code>JS</code> <code>JNS</code></td><td>переход, если S = 1 / S = 0</td><td>—</td></tr>
+</table>
+<p>У арифметики и логики A1 и A2 — всегда регистры, A3 — регистр или число. Буква N в названии перехода значит «не»: <code>JNZ</code> — «если не ноль».</p>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>5</i>Как процессор читает команду</h2>
+<p class="lead">Сдвиг вправо ставит нужное поле в младшие биты, маска «И» отрезает всё лишнее.</p>
+<div class="cols">
+<div>
+<pre><span class="c"># IR = 0x10111001</span>
+КОП = (IR &gt;&gt; 24) &amp; 0xFF   <span class="c"># 0x10  ADD</span>
+ТП  = (IR &gt;&gt; 22) &amp; 0x3    <span class="c"># 00    регистр</span>
+ТИ  = (IR &gt;&gt; 20) &amp; 0x3    <span class="c"># 01    число</span>
+A1  = (IR &gt;&gt; 16) &amp; 0xF    <span class="c"># 1     R1</span>
+A2  = (IR &gt;&gt; 12) &amp; 0xF    <span class="c"># 1     R1</span>
+A3  =  IR        &amp; 0xFFF  <span class="c"># 1</span></pre>
+</div>
+<div>
+<p>Маска — число, у которого единицы стоят на нужных битах: <code>0xF</code> = <code>1111</code> оставляет 4 бита, <code>0xFFF</code> — 12 бит.</p>
+<p>Дальше исполнение: взять R1 и число 1, сложить в АЛУ, обновить флаги, записать результат в R1. Итог: <code>ADD R1, R1, 1</code>.</p>
+<p>Сборка команды ассемблером — обратное действие: поля сдвигаются влево и склеиваются операцией «ИЛИ».</p>
+</div>
+</div>
+</section>
+
+<!-- ===================================================================== -->
+<section class="flow">
+<h2><i>6</i>Условия и циклы</h2>
+<p class="lead">В машинном коде нет ни if, ни for. Есть только «изменить PC, если флаг такой-то».</p>
+
+<p>Обычно PC сам идёт от команды к команде. Команда перехода записывает в PC другой адрес — и исполнение продолжается оттуда. <b>Условный</b> переход делает это только при нужном значении флага; иначе процессор просто идёт дальше. Поэтому условие всегда состоит из двух команд: сначала арифметика или <code>CMP</code> выставляет флаги, затем переход их проверяет.</p>
+
+<div class="cols">
+<div>
+<h3>Условие <span>— перепрыгнуть ненужное</span></h3>
+<pre><span class="c">; if (R1 &lt; R3) R1 = R3</span>
+      <span class="k">CMP</span>  R1, R3   <span class="c">; C=1, если R1 &lt; R3</span>
+      <span class="k">JNC</span>  skip     <span class="c">; R1 ≥ R3 — мимо</span>
+      MOV  R1, R3
+skip: …</pre>
+<p>Переход делается по <em>обратному</em> условию: он обходит действие, которое выполнять не надо.</p>
+</div>
+<div>
+<h3>Цикл <span>— прыжок назад</span></h3>
+<pre>      MOV  R2, 6    <span class="c">; счётчик</span>
+loop: …             <span class="c">; тело цикла</span>
+      <span class="k">SUB</span>  R2, R2, 1
+      <span class="k">JNZ</span>  loop     <span class="c">; не ноль — ещё раз</span></pre>
+<p>Счётчик убывает до нуля. <code>SUB</code> сам выставляет Z, отдельный <code>CMP</code> не нужен.</p>
+</div>
+</div>
+
+<h3>Метки</h3>
+<p>Метка (<code>loop:</code>) — это имя адреса. Она не превращается в команду и не занимает памяти: ассемблер просто запоминает, какой адрес у следующей за ней команды, и подставляет его в переходы. В программе максимума <code>loop</code> = <code>0x00A</code>, поэтому <code>JNZ loop</code> кодируется как <code>3210000A</code>.</p>
+
+<h3>Абсолютный и относительный переход</h3>
+<table class="tight">
+<tr><th style="width:22%">Адресация</th><th style="width:36%">Что в команде</th><th>Свойства</th></tr>
+<tr><td><b>Абсолютная</b> — у нас</td><td>сам адрес: PC ← A3</td><td>Просто; 12 бит поля покрывают всю память</td></tr>
+<tr><td>Относительная</td><td>смещение: PC ← PC + A3</td><td>Смещение короче адреса и может быть отрицательным; код можно переносить в другое место памяти</td></tr>
+</table>
+</section>
+
+<!-- ===================================================================== -->
+<section class="flow">
+<h2><i>7</i>Длинная арифметика</h2>
+<p class="lead">Число не помещается в регистр — значит, храним его в нескольких регистрах и считаем по частям, как в столбик.</p>
+
+<p>Зачем она в свёртке. Элементы — до 65 535. Произведение двух таких чисел — до 4 294 836 225, это 32 бита. Сумма шести произведений — до ≈ 2,58·10¹⁰, это уже 35 бит. Регистр же — 16 бит. Поэтому произведение занимает два регистра, а сумма S — три (48 бит).</p>
+
+<div class="cols">
+<div>
+<h3>Умножение: две половины</h3>
+<pre><span class="k">MUL</span>  R5, R3, R4  <span class="c">; младшие 16 бит</span>
+<span class="k">MULH</span> R6, R3, R4  <span class="c">; старшие 16 бит</span></pre>
+<pre>60000 × 60000 = 3 600 000 000
+              = 0x <span class="k">D693</span> <span class="m">A400</span>
+                   R6   R5</pre>
+<p class="small">Так же устроено в RISC-V (<code>mul</code> / <code>mulhu</code>). В x86 команда <code>MUL</code> кладёт обе половины в пару регистров DX:AX — это неявная адресация, для трёхадресной машины она не нужна.</p>
+</div>
+<div>
+<h3>Сложение: перенос между словами</h3>
+<pre><span class="k">ADD</span> R7, R7, R5   <span class="c">; младшие, C ← перенос</span>
+<span class="k">ADC</span> R8, R8, R6   <span class="c">; средние + C</span>
+<span class="k">ADC</span> R9, R9, 0    <span class="c">; старшее + C</span></pre>
+<pre>        R9    R8    R7
+S     0000  9502  F900
++           D693  A400
+перенос  <span class="m">1</span> ←   <span class="m">1</span> ←
+      ────────────────
+S     0001  6B96  9D00</pre>
+</div>
+</div>
+<p><code>ADC</code> — то же сложение, но прибавляет ещё и флаг C, оставшийся от предыдущего сложения. Так перенос из младшего слова попадает в следующее — ровно как «один в уме» при сложении в столбик, только разряд здесь — целое 16-битное слово. Порядок важен: между <code>ADD</code> и <code>ADC</code> не должно быть команд, меняющих флаги. Для вычитания есть зеркальная пара <code>SUB</code> / <code>SBB</code>.</p>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>8</i>Программа 1: максимум в массиве</h2>
+<p class="lead">Идём по массиву указателем, держим лучший результат в аккумуляторе, считаем оставшиеся элементы.</p>
+
+<table class="tight">
+<tr><td style="width:7%"><b>R0</b></td><td>указатель: адрес текущего элемента</td><td style="width:7%"><b>R2</b></td><td>счётчик: сколько элементов осталось</td></tr>
+<tr><td><b>R1</b></td><td>аккумулятор: текущий максимум</td><td><b>R3</b></td><td>текущий элемент</td></tr>
+</table>
+
+<pre><span class="c">адрес  маш. код    ассемблер</span>
+0x000  0110 0100         MOV  R0, arr       <span class="c">; R0 ← адрес массива          (непосредственная)</span>
+0x002  0132 0000         MOV  R2, [R0]      <span class="c">; R2 ← размер, первая ячейка  (косвенно-регистровая)</span>
+0x004  0111 0000         MOV  R1, 0         <span class="c">; максимум ← 0: меньше беззнаковых не бывает</span>
+0x006  1610 2000         CMP  R2, 0         <span class="c">; массив пуст?</span>
+0x008  3110 0018         JZ   done
+0x00A  1010 0001  loop:  ADD  R0, R0, 1     <span class="c">; указатель на следующий элемент</span>
+0x00C  0133 0000         MOV  R3, [R0]      <span class="c">; R3 ← элемент</span>
+0x00E  1600 1003         <span class="k">CMP  R1, R3</span>        <span class="c">; максимум − элемент; C = 1, если максимум меньше</span>
+0x010  3410 0014         <span class="k">JNC  next</span>          <span class="c">; максимум ≥ элемента — оставить</span>
+0x012  0101 0003         MOV  R1, R3        <span class="c">; новый максимум              (регистровая)</span>
+0x014  1212 2001  next:  SUB  R2, R2, 1     <span class="c">; счётчик − 1</span>
+0x016  3210 000A         JNZ  loop          <span class="c">; не ноль — следующий элемент</span>
+0x018  0181 0107  done:  MOV  [max], R1     <span class="c">; сохранить ответ             (прямая)</span>
+0x01A  0000 0000         HLT
+
+0x100  0006 000C 0007 0063 0004 001F 0012   arr: .word 6, 12, 7, 99, 4, 31, 18
+0x107  0000                                 max: .word 0</pre>
+
+<h3>Что происходит по итерациям</h3>
+<table class="tight nowrap">
+<tr><th>Итерация</th><th>R0</th><th>Элемент R3</th><th>CMP R1, R3</th><th>Флаг C</th><th>Максимум R1</th><th>Счётчик R2</th></tr>
+<tr><td>1</td><td><code>0x101</code></td><td>12</td><td>0 − 12</td><td>1 → заменить</td><td>12</td><td>5</td></tr>
+<tr><td>2</td><td><code>0x102</code></td><td>7</td><td>12 − 7</td><td>0</td><td>12</td><td>4</td></tr>
+<tr><td>3</td><td><code>0x103</code></td><td>99</td><td>12 − 99</td><td>1 → заменить</td><td>99</td><td>3</td></tr>
+<tr><td>4</td><td><code>0x104</code></td><td>4</td><td>99 − 4</td><td>0</td><td>99</td><td>2</td></tr>
+<tr><td>5</td><td><code>0x105</code></td><td>31</td><td>99 − 31</td><td>0</td><td>99</td><td>1</td></tr>
+<tr><td>6</td><td><code>0x106</code></td><td>18</td><td>99 − 18</td><td>0</td><td>99</td><td>0 → Z = 1, выход</td></tr>
+</table>
+<p>Ответ: в ячейке <code>max</code> (<code>0x107</code>) число 99 = <code>0x0063</code>. Всего выполнено 45 команд.</p>
+<div class="note"><p><b>Что стоит заметить.</b> В программе использованы все четыре типа адресации. Размер массива не зашит в программу, а читается из его первой ячейки — программа работает с массивом любой длины. Проверка <code>CMP R2, 0</code> защищает от пустого массива: без неё счётчик ушёл бы в 0 − 1 = 65 535 и цикл выполнился бы 65 536 раз.</p></div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>9</i>Программа 2: свёртка двух массивов</h2>
+<p class="lead">Тот же цикл, но два указателя, а в теле — 32-битное произведение и 48-битная сумма.</p>
+
+<p><b>R0, R1</b> — указатели на элементы A и B · <b>R2</b> — счётчик · <b>R3, R4</b> — текущие элементы · <b>R6 : R5</b> — произведение, старшая и младшая половины · <b>R9 : R8 : R7</b> — сумма S, от старшего слова к младшему.</p>
+
+<pre><span class="c">адрес  маш. код    ассемблер</span>
+0x000  0110 0100         MOV  R0, a         <span class="c">; указатель на A</span>
+0x002  0111 0107         MOV  R1, b         <span class="c">; указатель на B</span>
+0x004  0132 0000         MOV  R2, [R0]      <span class="c">; счётчик ← размер</span>
+0x006  0117 0000         MOV  R7, 0         <span class="c">; S ← 0 (три слова)</span>
+0x008  0118 0000         MOV  R8, 0
+0x00A  0119 0000         MOV  R9, 0
+0x00C  1610 2000         CMP  R2, 0         <span class="c">; массив пуст?</span>
+0x00E  3110 0026         JZ   done
+0x010  1010 0001  loop:  ADD  R0, R0, 1     <span class="c">; следующие элементы</span>
+0x012  1011 1001         ADD  R1, R1, 1
+0x014  0133 0000         MOV  R3, [R0]      <span class="c">; R3 ← A[i]</span>
+0x016  0134 0001         MOV  R4, [R1]      <span class="c">; R4 ← B[i]</span>
+0x018  1405 3004         <span class="k">MUL  R5, R3, R4</span>    <span class="c">; младшая половина произведения</span>
+0x01A  1506 3004         <span class="k">MULH R6, R3, R4</span>    <span class="c">; старшая половина</span>
+0x01C  1007 7005         <span class="k">ADD  R7, R7, R5</span>    <span class="c">; младшие слова, C ← перенос</span>
+0x01E  1108 8006         <span class="k">ADC  R8, R8, R6</span>    <span class="c">; средние слова + перенос</span>
+0x020  1119 9000         <span class="k">ADC  R9, R9, 0</span>     <span class="c">; старшее слово + перенос</span>
+0x022  1212 2001         SUB  R2, R2, 1
+0x024  3210 0010         JNZ  loop
+0x026  0187 010E  done:  MOV  [s_low], R7   <span class="c">; сохранить S в память</span>
+0x028  0188 010F         MOV  [s_mid], R8
+0x02A  0189 0110         MOV  [s_high], R9
+0x02C  0000 0000         HLT
+
+0x100  0006 C350 EA60 FFFF 04D2 0007 9C40   a: .word 6, 50000, 60000, 65535, 1234, 7, 40000
+0x107  0006 C350 EA60 FFFF 10E1 0009 7530   b: .word 6, 50000, 60000, 65535, 4321, 9, 30000
+0x10E  0000 0000 0000                       s_low, s_mid, s_high</pre>
+
+<h3>Что происходит по итерациям</h3>
+<table class="tight">
+<tr><th>i</th><th class="r">Aᵢ</th><th class="r">Bᵢ</th><th>Произведение R6 : R5</th><th>Сумма R9 : R8 : R7 после</th><th class="r">S в десятичном виде</th></tr>
+<tr><td>1</td><td class="r">50 000</td><td class="r">50 000</td><td><code>9502 F900</code></td><td><code>0000 9502 F900</code></td><td class="r">2 500 000 000</td></tr>
+<tr><td>2</td><td class="r">60 000</td><td class="r">60 000</td><td><code>D693 A400</code></td><td><code>0001 6B96 9D00</code></td><td class="r">6 100 000 000</td></tr>
+<tr><td>3</td><td class="r">65 535</td><td class="r">65 535</td><td><code>FFFE 0001</code></td><td><code>0002 6B94 9D01</code></td><td class="r">10 394 836 225</td></tr>
+<tr><td>4</td><td class="r">1 234</td><td class="r">4 321</td><td><code>0051 5C92</code></td><td><code>0002 6BE5 F993</code></td><td class="r">10 400 168 339</td></tr>
+<tr><td>5</td><td class="r">7</td><td class="r">9</td><td><code>0000 003F</code></td><td><code>0002 6BE5 F9D2</code></td><td class="r">10 400 168 402</td></tr>
+<tr><td>6</td><td class="r">40 000</td><td class="r">30 000</td><td><code>4786 8C00</code></td><td><code>0002 B36C 85D2</code></td><td class="r">11 600 168 402</td></tr>
+</table>
+<p>Ответ — склейка трёх слов: S = <code>0x0002 B36C 85D2</code> = 11 600 168 402, выполнено 78 команд. Уже на второй итерации сумма перерастает 32 бита: R9 становится ненулевым. Без третьего слова и <code>ADC</code> ответ был бы неверным.</p>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>10</i>Ассемблер</h2>
+<p class="lead">Программа, которая превращает текст в машинные слова. Три шага на каждую строку и два прохода по всей программе.</p>
+
+<div class="steps">
+  <div><i>1 · Лексический анализ</i><b>строка → токены</b><span>Текст режется на минимальные смысловые единицы — лексемы. Каждой даётся тип. Пробелы и комментарии отбрасываются.</span></div>
+  <div><i>2 · Синтаксический анализ</i><b>токены → команда</b><span>Проверяется порядок токенов. Выделяются метка, название команды, операнды; по записи операнда определяется тип адресации.</span></div>
+  <div><i>3 · Генерация кода</i><b>команда → число</b><span>Код операции, типы адресации и операнды расставляются по полям машинного слова.</span></div>
+</div>
+
+<pre><span class="c">строка</span>   loop: ADD R0, R0, 1
+
+<span class="c">токены</span>   (имя, loop) (:) (имя, ADD) (регистр, 0) (,) (регистр, 0) (,) (число, 1)
+
+<span class="c">разбор</span>   метка = loop    команда = ADD    операнды: R0 (регистр), R0 (регистр), 1 (число)
+
+<span class="c">код</span>      КОП=10  ТП=00 ТИ=01  A1=0  A2=0  A3=001   →   0x10100001   →   ячейки 0x1010, 0x0001</pre>
+
+<h3>Метки и два прохода</h3>
+<p>Проблема: команда <code>JZ done</code> стоит по адресу <code>0x008</code>, а метка <code>done</code> объявлена ниже. В момент, когда ассемблер встречает переход, адрес метки ещё неизвестен — это <b>ссылка вперёд</b>.</p>
+<div class="cols">
+<div>
+<p><b>Первый проход</b> ничего не кодирует. Он только считает адреса (команда — 2 ячейки, <code>.word</code> — по ячейке на число) и записывает метки в <b>таблицу меток</b>.</p>
+<p><b>Второй проход</b> уже знает все адреса: заменяет имена меток числами и генерирует машинные слова.</p>
+</div>
+<div>
+<table class="tight" style="margin-top:0">
+<tr><th>Метка</th><th>Адрес</th><th>Что там</th></tr>
+<tr><td><code>loop</code></td><td><code>0x00A</code></td><td>начало тела цикла</td></tr>
+<tr><td><code>next</code></td><td><code>0x014</code></td><td>уменьшение счётчика</td></tr>
+<tr><td><code>done</code></td><td><code>0x018</code></td><td>сохранение ответа</td></tr>
+<tr><td><code>arr</code></td><td><code>0x100</code></td><td>массив</td></tr>
+<tr><td><code>max</code></td><td><code>0x107</code></td><td>ячейка ответа</td></tr>
+</table>
+</div>
+</div>
+<h3>Понятия, которые могут спросить</h3>
+<table class="tight">
+<tr><td style="width:27%"><b>Неразрешённые ссылки</b></td><td>Способ из пособия с тем же результатом за один проход: встретив неизвестную метку, ассемблер запоминает место команды, а когда метка объявляется — возвращается и вписывает адрес</td></tr>
+<tr><td><b>Директива</b></td><td>Указание ассемблеру, а не команда процессора. <code>.word</code> кладёт числа в память, <code>.org</code> задаёт адрес размещения. Метка — тоже директива</td></tr>
+<tr><td><b>Ортогональность</b></td><td>Единый формат: любой регистр и любой допустимый тип адресации подставляются в поля одинаково, без отдельной проверки каждой комбинации. Поэтому генератор кода — несколько строк</td></tr>
+<tr><td><b>Псевдокоманда</b></td><td>Запись, которой нет в системе команд; ассемблер заменяет её настоящей. В RISC-V <code>mv x5, x6</code> — это <code>addi x5, x6, 0</code>. У нас <code>MOV</code> — настоящая команда</td></tr>
+<tr><td><b>Кросс-ассемблер</b></td><td>Работает на одной машине (ПК), а код создаёт для другой (наш процессор)</td></tr>
+</table>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>11</i>Эмулятор</h2>
+<p class="lead">Процессор в переменных: массив — память, список — регистры, цикл — такт.</p>
+
+<figure>
+<img src="img/emulator.png" alt="Окно эмулятора">
+<figcaption>Слева — программа, голубым выделена следующая команда. В центре — PC, флаги, регистр команд с разбором по полям и регистры; жёлтым выделено то, что изменила последняя команда. Справа — память: команды и данные в одной таблице. Внизу — журнал исполнения.</figcaption>
+</figure>
+
+<div class="cols">
+<div>
+<h3 style="margin-top:2pt">Сердце эмулятора</h3>
+<pre>mem = [0] * 4096      <span class="c"># память</span>
+reg = [0] * 16        <span class="c"># R0…R15</span>
+pc = 0
+
+<span class="k">while not</span> halted:
+    <span class="c"># выборка</span>
+    ir = mem[pc] &lt;&lt; 16 | mem[pc + 1]
+    pc += 2
+    <span class="c"># декодирование</span>
+    op = (ir &gt;&gt; 24) &amp; 0xFF
+    a1 = (ir &gt;&gt; 16) &amp; 0xF  <span class="c"># и т. д.</span>
+    <span class="c"># исполнение</span>
+    <span class="k">if</span> op == 0x10:            <span class="c"># ADD</span>
+        reg[a1] = alu(reg[a2], operand)
+    <span class="k">elif</span> op == 0x32:          <span class="c"># JNZ</span>
+        <span class="k">if not</span> z: pc = a3</pre>
+</div>
+<div>
+<h3 style="margin-top:2pt">Как показывать</h3>
+<ul>
+  <li><b>Maximum</b> → несколько раз <b>Step</b>: показать, как меняются PC, IR с полями, регистры и флаги. Затем <b>Run</b>: ответ 99 в ячейке <code>max</code>.</li>
+  <li>Изменить числа в строке <code>.word</code> прямо в окне, нажать <b>Assemble</b>, запустить снова — ассемблер работает с вводом пользователя.</li>
+  <li><b>Convolution</b> → <b>Run</b>: на второй итерации R9 становится 1 — перенос дошёл до третьего слова. Ответ в <code>s_high : s_mid : s_low</code>.</li>
+  <li>Написать ошибку, например <code>ADD R1, [R2], R3</code>: ассемблер подсветит строку и объяснит, что арифметика с памятью не работает.</li>
+</ul>
+<p class="small">Запуск: <code>python3 main.py</code>. Выход из цикла — по команде <code>HLT</code>; программу без <code>HLT</code> эмулятор сам остановит после 20 000 команд.</p>
+</div>
+</div>
+<p class="small"><b>Эмуляция</b> — воспроизведение работы одной вычислительной системы на другой так, чтобы та же программа на тех же данных дала тот же результат. Отличие от моделирования: моделируют абстрактную модель явления, эмулируют — поведение конкретного устройства.</p>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>12</i>Вопросы на защите</h2>
+<p class="lead">Короткие ответы на то, о чём спросят скорее всего.</p>
+<div class="qa">
+<div><b>Где здесь архитектура фон Неймана?</b><span>Память одна. Команды лежат с адреса 0x000, данные — с 0x100, в одной таблице. Команда — обычное число: её можно прочитать и перезаписать командой MOV. В гарвардской было бы два массива памяти.</span></div>
+<div><b>Почему команды трёхадресные?</b><span>В каждой три адресных поля: A1 — куда положить результат, A2 и A3 — откуда взять операнды. <code>ADD R7, R7, R5</code>. Операнды при этом не портятся.</span></div>
+<div><b>А у MOV и JMP операндов меньше трёх?</b><span>Адресность — свойство формата. Поля остаются, ненужные заполнены нулями. Так прямо сказано в пособии.</span></div>
+<div><b>Почему это RISC?</b><span>Команды одной длины и одного формата; арифметика — только над регистрами; к памяти обращается только MOV.</span></div>
+<div><b>Где четыре типа адресации?</b><span>В программе максимума: <code>MOV R0, arr</code> — непосредственная, <code>MOV R1, R3</code> — регистровая, <code>MOV [max], R1</code> — прямая, <code>MOV R3, [R0]</code> — косвенно-регистровая.</span></div>
+<div><b>Как эмулятор узнаёт тип адресации?</b><span>Из полей ТП и ТИ команды, по 2 бита. Ассемблер заполняет их по записи операнда: скобки, имя регистра или число.</span></div>
+<div><b>Зачем длинная арифметика?</b><span>Произведение двух 16-битных чисел — 32 бита, сумма шести — до 35. Регистр — 16 бит. Произведение берём по половинам (MUL, MULH), сумму складываем по словам с переносом (ADD, ADC, ADC).</span></div>
+<div><b>Что делает ADC?</b><span>Складывает два операнда и флаг C от предыдущего сложения. Так перенос из младшего слова попадает в старшее.</span></div>
+<div><b>Как сравнить числа без знака?</b><span>CMP вычитает и ставит флаги. Если был заём (C = 1) — первое меньше. Z = 1 — равны.</span></div>
+<div><b>Почему PC растёт на 2, а указатель массива на 1?</b><span>Ячейка — 16 бит. Команда — 32 бита, две ячейки. Число — одна ячейка.</span></div>
+<div><b>Почему число в команде не больше 4095?</b><span>Под него 12 бит поля A3. Большие константы лежат в памяти (<code>.word</code>) и загружаются через MOV. Это обычный компромисс формата фиксированной длины.</span></div>
+<div><b>Переходы абсолютные или относительные?</b><span>Абсолютные: в поле A3 сам адрес, он записывается в PC.</span></div>
+<div><b>Как ассемблер находит метку, объявленную ниже?</b><span>Два прохода: первый собирает таблицу меток, второй подставляет адреса.</span></div>
+<div><b>Что изменится для чисел со знаком?</b><span>Дополнительный код, флаг переполнения OF, знаковое умножение, переходы «меньше / больше» по S и OF. Сложение и вычитание останутся теми же.</span></div>
+<div><b>Почему начальный максимум — 0?</b><span>Числа беззнаковые, меньше нуля не бывает. Для знаковых пришлось бы начинать с первого элемента.</span></div>
+<div><b>Что будет, если программа не остановится?</b><span>Эмулятор сам прервёт её после 20 000 команд. Обращение за пределы памяти или неизвестный код операции тоже останавливают процессор с понятным сообщением.</span></div>
+</div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2><i>13</i>Шпаргалка</h2>
+<p class="lead">Вся машина на одной странице.</p>
+
+<div class="bitnum"><div class="w8"><span>31</span><span>24</span></div><div class="w2"><span>23</span></div><div class="w2"><span>21</span></div><div class="w4"><span>19</span><span>16</span></div><div class="w4"><span>15</span><span>12</span></div><div class="w12"><span>11</span><span>0</span></div></div>
+<div class="bits">
+  <div class="w8 hi"><b>КОП</b><span>что делать</span></div>
+  <div class="w2"><b>ТП</b><span>тип</span></div>
+  <div class="w2"><b>ТИ</b><span>тип</span></div>
+  <div class="w4"><b>A1</b><span>результат</span></div>
+  <div class="w4"><b>A2</b><span>операнд 1</span></div>
+  <div class="w12"><b>A3</b><span>операнд 2: регистр, число или адрес</span></div>
+</div>
+<p class="small" style="margin-top:6pt">В hex: <code>КК Т 1 2 333</code>. Команда — 32 бита = 2 ячейки. A1 ← A2 операция A3.</p>
+
+<div class="cols" style="margin-top:10pt">
+<div>
+<h3 style="margin-top:0">Машина</h3>
+<table class="tight">
+<tr><td>Память</td><td>4096 × 16 бит, общая</td></tr>
+<tr><td>Регистры</td><td>R0…R15, 16 бит</td></tr>
+<tr><td>PC</td><td>адрес следующей команды</td></tr>
+<tr><td>IR</td><td>текущая команда, 32 бита</td></tr>
+<tr><td>Числа</td><td>без знака, 0…65 535</td></tr>
+</table>
+<h3>Адресация</h3>
+<table class="tight">
+<tr><td><code>00</code></td><td><code>R5</code></td><td>регистровая</td></tr>
+<tr><td><code>01</code></td><td><code>12</code>, <code>arr</code></td><td>непосредственная</td></tr>
+<tr><td><code>10</code></td><td><code>[max]</code></td><td>прямая</td></tr>
+<tr><td><code>11</code></td><td><code>[R0]</code></td><td>косвенно-регистровая</td></tr>
+</table>
+<h3>Флаги</h3>
+<table class="tight">
+<tr><td><b>Z</b></td><td>результат = 0</td></tr>
+<tr><td><b>C</b></td><td>перенос / заём / не поместилось</td></tr>
+<tr><td><b>S</b></td><td>старший бит результата</td></tr>
+</table>
+</div>
+<div>
+<h3 style="margin-top:0">Команды</h3>
+<table class="tight">
+<tr><td><code>00</code></td><td><code>HLT</code></td><td>останов</td></tr>
+<tr><td><code>01</code></td><td><code>MOV</code></td><td>пересылка, работа с памятью</td></tr>
+<tr><td><code>10 11</code></td><td><code>ADD ADC</code></td><td>сложение, с переносом</td></tr>
+<tr><td><code>12 13</code></td><td><code>SUB SBB</code></td><td>вычитание, с заёмом</td></tr>
+<tr><td><code>14 15</code></td><td><code>MUL MULH</code></td><td>младшая и старшая половина произведения</td></tr>
+<tr><td><code>16</code></td><td><code>CMP</code></td><td>сравнение: только флаги</td></tr>
+<tr><td><code>20–22</code></td><td><code>AND OR XOR</code></td><td>логика</td></tr>
+<tr><td><code>23 24</code></td><td><code>SHL SHR</code></td><td>сдвиги</td></tr>
+<tr><td><code>30</code></td><td><code>JMP</code></td><td>переход</td></tr>
+<tr><td><code>31 32</code></td><td><code>JZ JNZ</code></td><td>если Z = 1 / 0</td></tr>
+<tr><td><code>33 34</code></td><td><code>JC JNC</code></td><td>если C = 1 / 0</td></tr>
+<tr><td><code>35 36</code></td><td><code>JS JNS</code></td><td>если S = 1 / 0</td></tr>
+</table>
+<h3>После CMP X, Y</h3>
+<table class="tight">
+<tr><td><code>JZ</code> X = Y</td><td><code>JNZ</code> X ≠ Y</td></tr>
+<tr><td><code>JC</code> X &lt; Y</td><td><code>JNC</code> X ≥ Y</td></tr>
+</table>
+</div>
+</div>
+
+<h3>Три шаблона</h3>
+<div class="cols3">
+<pre><span class="c">; цикл</span>
+loop: …
+      SUB R2, R2, 1
+      JNZ loop</pre>
+<pre><span class="c">; обход массива</span>
+ADD R0, R0, 1
+MOV R3, [R0]</pre>
+<pre><span class="c">; 48-битная сумма</span>
+ADD R7, R7, R5
+ADC R8, R8, R6
+ADC R9, R9, 0</pre>
+</div>
+</section>
+
+</body>
+</html>
